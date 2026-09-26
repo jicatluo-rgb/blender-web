@@ -1,0 +1,954 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Blender Web — Cycles 路径追踪演示</title>
+<style>
+  :root{
+    --bg:#1c1c1c; --panel:#232323; --panel2:#2b2b2b; --line:#3a3a3a;
+    --txt:#d7d7d7; --muted:#9a9a9a; --accent:#4772b3; --accent2:#5b8dd6;
+    --ok:#5aa469; --warn:#c9803f;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{
+    background:var(--bg); color:var(--txt);
+    font:13px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,"PingFang SC","Microsoft YaHei",sans-serif;
+    overflow:hidden; user-select:none;
+  }
+  #app{display:flex; flex-direction:column; height:100vh}
+  /* top bar */
+  header{
+    height:40px; background:linear-gradient(#2a2a2a,#232323); border-bottom:1px solid var(--line);
+    display:flex; align-items:center; gap:14px; padding:0 14px; flex:none;
+  }
+  header .logo{font-weight:700; letter-spacing:.3px; color:#f2f2f2; display:flex; align-items:center; gap:8px}
+  header .logo b{color:var(--accent2)}
+  header .badge{font-size:11px; color:var(--muted); background:#2f2f2f; border:1px solid var(--line); padding:2px 8px; border-radius:10px}
+  header .spacer{flex:1}
+  header .stat{font-size:11px; color:var(--muted)}
+  header .stat b{color:#eee}
+  main{flex:1; display:flex; min-height:0}
+  /* viewport */
+  #viewport{flex:1; position:relative; background:#111; min-width:0}
+  #glcanvas{width:100%; height:100%; display:block; cursor:grab}
+  #glcanvas.dragging{cursor:grabbing}
+  #hud{
+    position:absolute; left:12px; top:10px; font-size:11px; color:#cfcfcf;
+    background:rgba(20,20,20,.55); backdrop-filter:blur(6px); border:1px solid rgba(255,255,255,.08);
+    border-radius:8px; padding:7px 10px; pointer-events:none; line-height:1.7;
+  }
+  #hud .k{color:var(--muted)}
+  #hud .v{color:#fff; font-weight:600}
+  #progwrap{
+    position:absolute; left:12px; bottom:12px; right:12px; height:5px;
+    background:rgba(255,255,255,.08); border-radius:4px; overflow:hidden; pointer-events:none;
+  }
+  #prog{height:100%; width:0%; background:linear-gradient(90deg,var(--accent),var(--accent2)); transition:width .12s linear}
+  #toast{
+    position:absolute; left:50%; bottom:34px; transform:translateX(-50%) translateY(10px);
+    background:rgba(30,30,30,.92); border:1px solid var(--line); color:#eee; padding:8px 16px;
+    border-radius:8px; font-size:12px; opacity:0; transition:.25s; pointer-events:none;
+  }
+  #toast.show{opacity:1; transform:translateX(-50%) translateY(0)}
+  /* sidebar */
+  aside{
+    width:290px; flex:none; background:var(--panel); border-left:1px solid var(--line);
+    overflow-y:auto; padding:0 0 30px;
+  }
+  aside::-webkit-scrollbar{width:9px}
+  aside::-webkit-scrollbar-thumb{background:#3a3a3a; border-radius:6px}
+  .tabs{display:flex; border-bottom:1px solid var(--line); position:sticky; top:0; background:var(--panel); z-index:2}
+  .tab{flex:1; text-align:center; padding:9px 0; font-size:12px; color:var(--muted); cursor:pointer; border-bottom:2px solid transparent}
+  .tab.active{color:#fff; border-bottom-color:var(--accent2); background:#282828}
+  .section{border-bottom:1px solid var(--line)}
+  .sec-h{
+    display:flex; align-items:center; gap:6px; padding:9px 12px; cursor:pointer; font-weight:600;
+    font-size:12px; color:#e8e8e8; background:var(--panel2);
+  }
+  .sec-h .tri{transition:.15s; color:var(--muted)}
+  .sec-h.collapsed .tri{transform:rotate(-90deg)}
+  .sec-b{padding:10px 12px; display:flex; flex-direction:column; gap:11px}
+  .sec-h.collapsed + .sec-b{display:none}
+  .row{display:flex; align-items:center; gap:8px}
+  .row label{flex:1; color:var(--muted); font-size:12px}
+  .row .val{width:52px; text-align:right; color:#eee; font-variant-numeric:tabular-nums; font-size:12px}
+  input[type=range]{flex:1.4; -webkit-appearance:none; height:4px; background:#444; border-radius:3px; outline:none}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none; width:14px; height:14px; border-radius:50%;
+    background:var(--accent2); cursor:pointer; border:2px solid #1c1c1c; box-shadow:0 0 0 1px var(--accent2)}
+  select,button{font:inherit}
+  select{background:#2f2f2f; color:#eee; border:1px solid var(--line); border-radius:5px; padding:5px 7px; flex:1.4}
+  .btn{background:#333; color:#eee; border:1px solid var(--line); border-radius:6px; padding:7px 10px; cursor:pointer; text-align:center; transition:.12s}
+  .btn:hover{background:#3d3d3d; border-color:#555}
+  .btn.primary{background:var(--accent); border-color:var(--accent2)}
+  .btn.primary:hover{background:var(--accent2)}
+  .btn.wide{width:100%}
+  .btngrid{display:grid; grid-template-columns:1fr 1fr; gap:7px}
+  .toggle{display:flex; align-items:center; gap:8px; cursor:pointer}
+  .switch{width:34px; height:18px; background:#444; border-radius:10px; position:relative; transition:.15s; flex:none}
+  .switch.on{background:var(--accent)}
+  .switch i{position:absolute; top:2px; left:2px; width:14px; height:14px; background:#fff; border-radius:50%; transition:.15s}
+  .switch.on i{left:18px}
+  .toggle span{color:var(--muted); font-size:12px}
+  .toggle.on span{color:#eee}
+  .hint{font-size:11px; color:#7d7d7d; line-height:1.5}
+  .pill{display:inline-block; font-size:10px; padding:1px 7px; border-radius:8px; background:#333; color:var(--accent2); border:1px solid var(--line)}
+  .qbtns{display:flex; gap:6px}
+  .qbtns .btn{flex:1; padding:6px 0; font-size:11px}
+  .qbtns .btn.sel{background:var(--accent); border-color:var(--accent2); color:#fff}
+  .swatches{display:flex; gap:6px; flex-wrap:wrap}
+  .sw{width:24px; height:24px; border-radius:5px; cursor:pointer; border:2px solid transparent}
+  .sw.sel{border-color:#fff}
+  .kbd{background:#2f2f2f; border:1px solid var(--line); border-bottom-width:2px; border-radius:4px; padding:1px 6px; font-size:11px; color:#ccc}
+  footer{height:26px; background:#1a1a1a; border-top:1px solid var(--line); display:flex; align-items:center; gap:16px; padding:0 12px; font-size:11px; color:var(--muted); flex:none}
+  footer .dot{width:8px;height:8px;border-radius:50%;background:var(--warn)}
+  footer .dot.ok{background:var(--ok)}
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <div class="logo">Blender <b>Web</b> <span class="badge">Cycles · GPU Path Tracer</span></div>
+    <div class="spacer"></div>
+    <div class="stat">采样 <b id="sTop">0</b> spp</div>
+    <div class="stat">降噪 <b id="dTop">SVGF</b></div>
+    <div class="stat"><b id="fpsTop">0</b> fps</div>
+  </header>
+
+  <main>
+    <div id="viewport">
+      <canvas id="glcanvas"></canvas>
+      <div id="hud">
+        <div><span class="k">视图</span> <span class="v" id="hViz">最终合成</span></div>
+        <div><span class="k">分辨率</span> <span class="v" id="hRes">—</span></div>
+        <div><span class="k">收敛</span> <span class="v" id="hConv">0%</span></div>
+      </div>
+      <div id="progwrap"><div id="prog"></div></div>
+      <div id="toast"></div>
+    </div>
+
+    <aside>
+      <div class="tabs">
+        <div class="tab active" data-tab="render">渲染</div>
+        <div class="tab" data-tab="denoise">降噪</div>
+        <div class="tab" data-tab="scene">场景</div>
+      </div>
+
+      <!-- RENDER TAB -->
+      <div data-panel="render">
+        <div class="section">
+          <div class="sec-h">采样 <span class="spacer" style="flex:1"></span><span class="pill" id="pillSpp">progressive</span></div>
+          <div class="sec-b">
+            <div class="row"><label>每帧采样</label><input type="range" id="spf" min="1" max="8" step="1" value="2"><span class="val" id="spfV">2</span></div>
+            <div class="row"><label>最大采样</label><input type="range" id="maxspp" min="16" max="4096" step="16" value="1024"><span class="val" id="maxsppV">1024</span></div>
+            <div class="row"><label>光线反弹</label><input type="range" id="bounces" min="1" max="12" step="1" value="6"><span class="val" id="bouncesV">6</span></div>
+            <div class="hint">渐进式累积：静止时逐帧收敛，移动时自动重置并即时降噪，保证交互流畅。</div>
+          </div>
+        </div>
+
+        <div class="section">
+          <div class="sec-h">性能 <span class="spacer" style="flex:1"></span></div>
+          <div class="sec-b">
+            <div class="row"><label>渲染比例</label>
+              <div class="qbtns" style="flex:1.4">
+                <div class="btn" data-scale="0.5">50%</div>
+                <div class="btn sel" data-scale="0.75">75%</div>
+                <div class="btn" data-scale="1">100%</div>
+              </div>
+            </div>
+            <div class="toggle on" id="tgAdaptive"><div class="switch on"><i></i></div><span>自适应采样（噪声区多采）</span></div>
+            <div class="hint">交互中降低比例可保持流畅；停下后自动锐化到全分辨率。</div>
+          </div>
+        </div>
+
+        <div class="section">
+          <div class="sec-h">胶片 / 色彩 <span class="spacer" style="flex:1"></span></div>
+          <div class="sec-b">
+            <div class="row"><label>曝光</label><input type="range" id="exposure" min="-3" max="3" step="0.05" value="0"><span class="val" id="exposureV">0.00</span></div>
+            <div class="row"><label>色调映射</label>
+              <select id="tonemap">
+                <option value="0">Filmic (AgX 风格)</option>
+                <option value="1">ACES</option>
+                <option value="2">Reinhard</option>
+                <option value="3">标准</option>
+              </select>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- DENOISE TAB -->
+      <div data-panel="denoise" style="display:none">
+        <div class="section">
+          <div class="sec-h">降噪器 <span class="spacer" style="flex:1"></span><span class="pill">增强</span></div>
+          <div class="sec-b">
+            <div class="toggle on" id="tgDenoise"><div class="switch on"><i></i></div><span>启用降噪</span></div>
+            <div class="row"><label>算法</label>
+              <select id="denoiser">
+                <option value="svgf" selected>SVGF 时空滤波（推荐）</option>
+                <option value="atrous">À-Trous 边缘保持小波</option>
+                <option value="bilateral">联合双边滤波</option>
+                <option value="none">仅累积（无空间滤波）</option>
+              </select>
+            </div>
+            <div class="hint">SVGF：时间累积 + 方差引导的边缘保持小波，逼近 Cycles OptiX/OIDN 的清晰度。</div>
+          </div>
+        </div>
+
+        <div class="section">
+          <div class="sec-h">滤波强度 <span class="spacer" style="flex:1"></span></div>
+          <div class="sec-b">
+            <div class="row"><label>滤波迭代</label><input type="range" id="atrousIter" min="1" max="6" step="1" value="5"><span class="val" id="atrousIterV">5</span></div>
+            <div class="row"><label>颜色权重 σ</label><input type="range" id="sigColor" min="0.1" max="8" step="0.1" value="2.0"><span class="val" id="sigColorV">2.0</span></div>
+            <div class="row"><label>法线权重 σ</label><input type="range" id="sigNormal" min="8" max="256" step="1" value="128"><span class="val" id="sigNormalV">128</span></div>
+            <div class="row"><label>深度权重 σ</label><input type="range" id="sigDepth" min="0.05" max="4" step="0.05" value="1.0"><span class="val" id="sigDepthV">1.0</span></div>
+            <div class="hint">用法向/深度/反照率 G-Buffer 引导，去噪同时保留边缘、纹理与阴影细节。</div>
+          </div>
+        </div>
+
+        <div class="section">
+          <div class="sec-h">时间稳定 <span class="spacer" style="flex:1"></span></div>
+          <div class="sec-b">
+            <div class="toggle on" id="tgTemporal"><div class="switch on"><i></i></div><span>时间累积复用</span></div>
+            <div class="row"><label>历史混合</label><input type="range" id="tempAlpha" min="0.02" max="0.4" step="0.01" value="0.1"><span class="val" id="tempAlphaV">0.10</span></div>
+            <div class="toggle on" id="tgFirefly"><div class="switch on"><i></i></div><span>萤火虫抑制（钳制强高光）</span></div>
+            <div class="toggle" id="tgDemod"><div class="switch"><i></i></div><span>反照率解调（去噪更干净）</span></div>
+            <div class="hint">时间累积在相机静止时快速降噪；解调先除反照率再滤波，避免糊掉纹理。</div>
+          </div>
+        </div>
+
+        <div class="section">
+          <div class="sec-h">调试可视化 <span class="spacer" style="flex:1"></span></div>
+          <div class="sec-b">
+            <div class="row"><label>显示缓冲</label>
+              <select id="viz">
+                <option value="0">最终合成</option>
+                <option value="1">噪声原图（未降噪）</option>
+                <option value="2">法线 G-Buffer</option>
+                <option value="3">反照率 G-Buffer</option>
+                <option value="4">深度</option>
+                <option value="5">方差 / 噪声估计</option>
+              </select>
+            </div>
+            <div class="hint">对比“噪声原图”与“最终合成”可直观看到降噪效果。</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- SCENE TAB -->
+      <div data-panel="scene" style="display:none">
+        <div class="section">
+          <div class="sec-h">材质 <span class="spacer" style="flex:1"></span></div>
+          <div class="sec-b">
+            <div class="row"><label>粗糙度</label><input type="range" id="roughness" min="0.02" max="1" step="0.01" value="0.12"><span class="val" id="roughnessV">0.12</span></div>
+            <div class="row"><label>金属度</label><input type="range" id="metallic" min="0" max="1" step="0.01" value="0.9"><span class="val" id="metallicV">0.90</span></div>
+            <div class="row"><label>基础色</label></div>
+            <div class="swatches" id="swatches"></div>
+          </div>
+        </div>
+        <div class="section">
+          <div class="sec-h">灯光 / 环境 <span class="spacer" style="flex:1"></span></div>
+          <div class="sec-b">
+            <div class="row"><label>灯光强度</label><input type="range" id="lightPow" min="0" max="12" step="0.1" value="5"><span class="val" id="lightPowV">5.0</span></div>
+            <div class="row"><label>环境亮度</label><input type="range" id="envPow" min="0" max="2" step="0.02" value="0.35"><span class="val" id="envPowV">0.35</span></div>
+            <div class="row"><label>地面反射</label><input type="range" id="floorRef" min="0" max="1" step="0.02" value="0.5"><span class="val" id="floorRefV">0.50</span></div>
+          </div>
+        </div>
+        <div class="section">
+          <div class="sec-h">操作 <span class="spacer" style="flex:1"></span></div>
+          <div class="sec-b">
+            <div class="btngrid">
+              <div class="btn" id="btnReset">重置相机</div>
+              <div class="btn primary" id="btnRender">重新渲染</div>
+            </div>
+            <div class="btn wide" id="btnSave">保存 PNG</div>
+            <div class="hint">拖拽旋转 · 滚轮缩放 · 右键平移。相机移动会自动重置采样。</div>
+          </div>
+        </div>
+      </div>
+    </aside>
+  </main>
+
+  <footer>
+    <div class="dot" id="fDot"></div>
+    <span id="fStatus">初始化 GPU 路径追踪器…</span>
+    <div class="spacer" style="flex:1"></div>
+    <span>WebGL2 · Progressive · SVGF Denoiser</span>
+  </footer>
+</div>
+
+<script>
+"use strict";
+/* ============================================================
+   Blender Web — GPU 路径追踪器 + 高级降噪 (SVGF / À-Trous)
+   单文件 / WebGL2 / 渐进式累积 + 时空边缘保持滤波
+   ============================================================ */
+
+const cv = document.getElementById('glcanvas');
+const gl = cv.getContext('webgl2', {antialias:false, preserveDrawingBuffer:true, powerPreference:'high-performance'});
+const toast = (m)=>{const t=document.getElementById('toast');t.textContent=m;t.classList.add('show');clearTimeout(t._t);t._t=setTimeout(()=>t.classList.remove('show'),1600);};
+
+if(!gl){ document.getElementById('fStatus').textContent='此浏览器不支持 WebGL2'; throw new Error('no webgl2'); }
+const extCBF = gl.getExtension('EXT_color_buffer_float');
+gl.getExtension('OES_texture_float_linear');
+if(!extCBF){ document.getElementById('fStatus').textContent='缺少 EXT_color_buffer_float 扩展'; }
+
+/* ---------- state ---------- */
+const S = {
+  spf:2, maxspp:1024, bounces:6,
+  scale:0.75,
+  exposure:0, tonemap:0,
+  denoise:true, denoiser:'svgf', atrousIter:5,
+  sigColor:2.0, sigNormal:128, sigDepth:1.0,
+  temporal:true, tempAlpha:0.1, firefly:true, demod:false,
+  adaptive:true, viz:0,
+  roughness:0.12, metallic:0.9, baseColor:[0.85,0.28,0.22],
+  lightPow:5.0, envPow:0.35, floorRef:0.5,
+  // camera
+  yaw:0.7, pitch:0.35, dist:6.5, target:[0,0.6,0],
+};
+let frame=0, spp=0, needReset=true, lastTime=performance.now(), fps=0;
+
+/* ---------- shader helpers ---------- */
+function sh(type,src){const s=gl.createShader(type);gl.shaderSource(s,src);gl.compileShader(s);
+  if(!gl.getShaderParameter(s,gl.COMPILE_STATUS)){console.error(gl.getShaderInfoLog(s),src);throw new Error('shader');}return s;}
+function prog(vs,fs){const p=gl.createProgram();gl.attachShader(p,sh(gl.VERTEX_SHADER,vs));gl.attachShader(p,sh(gl.FRAGMENT_SHADER,fs));
+  gl.linkProgram(p);if(!gl.getProgramParameter(p,gl.LINK_STATUS)){console.error(gl.getProgramInfoLog(p));throw new Error('link');}return p;}
+
+const VS = `#version 300 es
+in vec2 p; out vec2 uv;
+void main(){ uv=p*0.5+0.5; gl_Position=vec4(p,0.,1.); }`;
+
+/* ============================================================
+   PATH TRACER — outputs: color(HDR,spp weight), normal+depth, albedo
+   ============================================================ */
+const PT_FS = `#version 300 es
+precision highp float;
+in vec2 uv;
+layout(location=0) out vec4 oColor;   // rgb = radiance sum (this frame path), a unused
+layout(location=1) out vec4 oNormal;  // xyz normal (world), w = linear depth
+layout(location=2) out vec4 oAlbedo;  // rgb albedo, a = 1 if hit
+uniform vec2 uRes;
+uniform float uFrame, uSpf, uBounces;
+uniform vec3 uCamPos, uCamF, uCamR, uCamU;
+uniform float uRough, uMetal; uniform vec3 uBase;
+uniform float uLightPow, uEnvPow, uFloorRef;
+
+// ---- rng ----
+uint seed;
+uint hash(uint x){ x^=x>>16u; x*=0x7feb352du; x^=x>>15u; x*=0x846ca68bu; x^=x>>16u; return x; }
+float rnd(){ seed=hash(seed); return float(seed)*(1.0/4294967296.0); }
+vec3 cosineHemi(vec3 n){
+  float u1=rnd(),u2=rnd(); float r=sqrt(u1); float th=6.2831853*u2;
+  vec3 t=normalize(cross(abs(n.x)>0.5?vec3(0,1,0):vec3(1,0,0),n));
+  vec3 b=cross(n,t);
+  return normalize(t*(r*cos(th))+b*(r*sin(th))+n*sqrt(max(0.,1.-u1)));
+}
+
+// ---- scene: 3 spheres + ground plane + area light ----
+struct Hit{ float t; vec3 n; vec3 alb; float rough; float metal; float emit; vec3 ec; };
+const float FAR=1e9;
+
+bool hitSphere(vec3 ro,vec3 rd,vec3 c,float r,inout float t,out vec3 n){
+  vec3 oc=ro-c; float b=dot(oc,rd); float cc=dot(oc,oc)-r*r; float h=b*b-cc;
+  if(h<0.)return false; h=sqrt(h); float x=-b-h; if(x<0.001)x=-b+h; if(x<0.001||x>t)return false;
+  t=x; n=normalize((ro+rd*x)-c); return true;
+}
+bool hitPlane(vec3 ro,vec3 rd,float y,inout float t,out vec3 n){
+  if(abs(rd.y)<1e-5)return false; float x=(y-ro.y)/rd.y; if(x<0.001||x>t)return false;
+  t=x; n=vec3(0,1,0); return true;
+}
+
+Hit trace(vec3 ro,vec3 rd){
+  Hit H; H.t=FAR; H.emit=0.; H.ec=vec3(0.);
+  float t=FAR; vec3 n;
+  // main sphere (user material)
+  if(hitSphere(ro,rd,vec3(0,0.6,0),0.9,t,n)){ H.t=t;H.n=n;H.alb=uBase;H.rough=uRough;H.metal=uMetal;H.emit=0.; }
+  // glossy dielectric-ish sphere
+  { float tt=t; vec3 nn; if(hitSphere(ro,rd,vec3(-1.7,0.45,0.9),0.45,tt,nn)){ t=tt;H.t=t;H.n=nn;H.alb=vec3(0.9);H.rough=0.03;H.metal=1.0;H.emit=0.; } }
+  // matte colored sphere
+  { float tt=t; vec3 nn; if(hitSphere(ro,rd,vec3(1.6,0.38,1.1),0.38,tt,nn)){ t=tt;H.t=t;H.n=nn;H.alb=vec3(0.25,0.55,0.85);H.rough=0.55;H.metal=0.0;H.emit=0.; } }
+  // area light sphere (emissive)
+  { float tt=t; vec3 nn; if(hitSphere(ro,rd,vec3(2.2,3.4,-1.5),0.7,tt,nn)){ t=tt;H.t=t;H.n=nn;H.alb=vec3(0.);H.rough=1.;H.metal=0.;H.emit=1.; H.ec=vec3(1.0,0.92,0.82)*uLightPow; } }
+  // ground plane, checker
+  { float tt=t; vec3 nn; if(hitPlane(ro,rd,-0.3,tt,nn)){ vec3 hp=ro+rd*tt;
+      float ch=mod(floor(hp.x)+floor(hp.z),2.0);
+      vec3 c=mix(vec3(0.22),vec3(0.7),ch);
+      t=tt;H.t=t;H.n=nn;H.alb=c;H.rough=mix(0.65,0.08,uFloorRef);H.metal=uFloorRef*0.4;H.emit=0.; } }
+  return H;
+}
+
+// environment (sky gradient + soft sun)
+vec3 envColor(vec3 rd){
+  float y=clamp(rd.y*0.5+0.5,0.,1.);
+  vec3 sky=mix(vec3(0.55,0.62,0.72), vec3(0.14,0.2,0.34), y);
+  vec3 ground=vec3(0.12,0.11,0.10);
+  vec3 c=rd.y>0.0?sky:mix(sky,ground,clamp(-rd.y*3.,0.,1.));
+  float sun=pow(max(dot(rd,normalize(vec3(0.5,0.8,-0.4))),0.),64.);
+  c+=vec3(1.0,0.9,0.7)*sun*1.5;
+  return c*uEnvPow*3.0;
+}
+
+vec3 fresnelSchlick(float ct,vec3 f0){ return f0+(1.-f0)*pow(clamp(1.-ct,0.,1.),5.); }
+
+// GGX importance sample
+vec3 sampleGGX(vec3 n,float rough){
+  float a=rough*rough; float u1=rnd(),u2=rnd();
+  float ph=6.2831853*u1; float ct=sqrt((1.-u2)/(1.+(a*a-1.)*u2)); float st=sqrt(max(0.,1.-ct*ct));
+  vec3 h=vec3(st*cos(ph),st*sin(ph),ct);
+  vec3 up=abs(n.z)<0.999?vec3(0,0,1):vec3(1,0,0);
+  vec3 tx=normalize(cross(up,n)); vec3 ty=cross(n,tx);
+  return normalize(tx*h.x+ty*h.y+n*h.z);
+}
+
+vec3 radiance(vec3 ro,vec3 rd, out vec3 fN, out float fD, out vec3 fA){
+  vec3 acc=vec3(0.); vec3 thr=vec3(1.);
+  fN=vec3(0.); fD=FAR; fA=vec3(0.);
+  int B=int(uBounces);
+  for(int b=0;b<24;b++){
+    if(b>=B)break;
+    Hit h=trace(ro,rd);
+    if(h.t>=FAR){ acc+=thr*envColor(rd); if(b==0){fA=envColor(rd);fN=vec3(0.);} break; }
+    vec3 hp=ro+rd*h.t;
+    vec3 N=h.n; if(dot(N,rd)>0.)N=-N;
+    if(b==0){ fN=N; fD=h.t; fA = h.emit>0.5 ? h.ec : mix(h.alb, h.alb*0.0+vec3(0.9), h.metal*0.0); if(h.emit<0.5) fA=h.alb; }
+    if(h.emit>0.5){ acc+=thr*h.ec; break; }
+
+    // BRDF: mix diffuse + GGX specular
+    vec3 f0=mix(vec3(0.04),h.alb,h.metal);
+    float spec=clamp(max(f0.r,max(f0.g,f0.b))+ (1.0-h.rough)*0.25, 0.04,1.0);
+    float pSpec = h.metal>0.5 ? 0.9 : mix(0.25,0.7,1.0-h.rough);
+    if(rnd()<pSpec){
+      vec3 H=sampleGGX(N,max(h.rough,0.02));
+      vec3 dir=reflect(rd,H);
+      if(dot(dir,N)<=0.){ break; }
+      vec3 F=fresnelSchlick(max(dot(H,-rd),0.),f0);
+      thr*= (F)/max(pSpec,0.001);
+      rd=dir;
+    } else {
+      vec3 dir=cosineHemi(N);
+      vec3 diff=mix(h.alb,vec3(0.),h.metal);
+      thr*= diff/max(1.0-pSpec,0.001);
+      rd=dir;
+    }
+    ro=hp+N*0.002;
+    // russian roulette
+    float q=max(thr.r,max(thr.g,thr.b));
+    if(b>3){ if(rnd()>q)break; thr/=max(q,0.001); }
+  }
+  return acc;
+}
+
+void main(){
+  ivec2 pix=ivec2(gl_FragCoord.xy);
+  seed = hash(uint(pix.x)+uint(pix.y)*1973u+uint(uFrame)*9277u+0x9E3779B9u);
+  vec3 col=vec3(0.); vec3 nrm=vec3(0.); float dep=FAR; vec3 alb=vec3(0.);
+  int SPF=int(uSpf);
+  for(int s=0;s<8;s++){
+    if(s>=SPF)break;
+    vec2 jit=vec2(rnd(),rnd())-0.5;
+    vec2 ndc=((gl_FragCoord.xy+jit)/uRes)*2.-1.;
+    ndc.x*=uRes.x/uRes.y;
+    vec3 rd=normalize(uCamF + uCamR*ndc.x + uCamU*ndc.y);
+    vec3 tN; float tD; vec3 tA;
+    col+=radiance(uCamPos,rd,tN,tD,tA);
+    if(s==0){ nrm=tN; dep=tD; alb=tA; }
+  }
+  col/=float(SPF);
+  oColor=vec4(col,1.0);
+  oNormal=vec4(nrm, dep>=FAR? 1e6 : dep);
+  oAlbedo=vec4(alb, dep>=FAR?0.0:1.0);
+}`;
+
+/* ============================================================
+   ACCUMULATE — temporal blend of new frame into history
+   also computes running mean & variance (moment buffer)
+   ============================================================ */
+const ACC_FS = `#version 300 es
+precision highp float;
+in vec2 uv;
+layout(location=0) out vec4 oAccum;    // rgb accumulated color, a = sample count
+layout(location=1) out vec4 oMoments;  // x=lum mean, y=lum^2 mean, z=variance, w=count
+uniform sampler2D uNew;     // this frame color
+uniform sampler2D uHistC;   // history accum color
+uniform sampler2D uHistM;   // history moments
+uniform sampler2D uNormal;
+uniform float uReset, uTemporal, uTempAlpha, uFirefly, uFrame;
+uniform vec2 uRes;
+float lum(vec3 c){ return dot(c,vec3(0.2126,0.7152,0.0722)); }
+
+void main(){
+  vec3 nc=texture(uNew,uv).rgb;
+  // firefly clamp
+  if(uFirefly>0.5){
+    float l=lum(nc);
+    // neighborhood max-based soft clamp
+    float m=0.0;
+    for(int y=-1;y<=1;y++)for(int x=-1;x<=1;x++){
+      vec2 o=vec2(float(x),float(y))/uRes;
+      m=max(m,lum(texture(uNew,uv+o).rgb));
+    }
+    float cap = m*4.0 + 0.5;
+    if(l>cap && l>0.0) nc*= cap/l;
+  }
+  vec4 hc=texture(uHistC,uv);
+  vec4 hm=texture(uHistM,uv);
+  float count = uReset>0.5 ? 0.0 : hc.a;
+
+  vec3 accCol;
+  float newCount=count+1.0;
+  if(uTemporal>0.5 && count>0.0){
+    // exponential moving average with min alpha (converges but stays responsive)
+    float a=max(uTempAlpha, 1.0/newCount);
+    accCol=mix(hc.rgb,nc,a);
+  } else {
+    accCol=(hc.rgb*count+nc)/newCount;
+  }
+
+  // moments for variance-guided filtering
+  float l=lum(nc);
+  float mu = count>0.0 ? hm.x : l;
+  float mu2= count>0.0 ? hm.y : l*l;
+  float a2=max(uTempAlpha, 1.0/newCount);
+  mu = mix(mu,l,a2);
+  mu2= mix(mu2,l*l,a2);
+  float variance=max(0.0, mu2-mu*mu);
+
+  oAccum=vec4(accCol,newCount);
+  oMoments=vec4(mu,mu2,variance,newCount);
+}`;
+
+/* ============================================================
+   ATROUS / SVGF — edge-avoiding wavelet filter guided by
+   normal, depth, albedo and variance. Iterated with growing step.
+   ============================================================ */
+const ATROUS_FS = `#version 300 es
+precision highp float;
+in vec2 uv;
+layout(location=0) out vec4 oColor;
+layout(location=1) out vec4 oVar;
+uniform sampler2D uColor;   // color (accum) with a=count
+uniform sampler2D uNormal;  // normal.xyz + depth.w
+uniform sampler2D uAlbedo;
+uniform sampler2D uMoments; // variance in .z
+uniform vec2 uRes;
+uniform float uStep, uSigColor, uSigNormal, uSigDepth, uUseVar, uDemod;
+float lum(vec3 c){ return dot(c,vec3(0.2126,0.7152,0.0722)); }
+
+void main(){
+  vec4 cC=texture(uColor,uv);
+  vec3 col=cC.rgb;
+  vec4 nC=texture(uNormal,uv);
+  vec3 N=nC.xyz; float D=nC.w;
+  vec3 alb=texture(uAlbedo,uv).rgb;
+  float var=texture(uMoments,uv).z;
+
+  // demodulate albedo (filter irradiance, keep texture sharp)
+  vec3 albS = max(alb,vec3(0.05));
+  vec3 signal = (uDemod>0.5) ? col/albS : col;
+
+  // 3x3 gaussian kernel weights (a-trous)
+  float kern[3]; kern[0]=1.0; kern[1]=2.0/3.0; kern[2]=1.0/6.0;
+
+  float lC=lum(signal);
+  float sigL = uSigColor * sqrt(max(var,1e-6)) + 0.02;
+
+  vec3 sum=vec3(0.); float wsum=0.0; float varSum=0.0;
+  for(int y=-2;y<=2;y++){
+    for(int x=-2;x<=2;x++){
+      vec2 off=vec2(float(x),float(y))*uStep/uRes;
+      vec2 su=uv+off;
+      if(su.x<0.||su.x>1.||su.y<0.||su.y>1.) continue;
+      vec4 sc=texture(uColor,su); vec3 s=sc.rgb;
+      vec3 sSig = (uDemod>0.5)? s/max(texture(uAlbedo,su).rgb,vec3(0.05)) : s;
+      vec4 sn=texture(uNormal,su); vec3 sN=sn.xyz; float sD=sn.w;
+      float sVar=texture(uMoments,su).z;
+
+      // weights
+      float wN=pow(max(dot(N,sN),0.0), uSigNormal);
+      float wD=exp(-abs(D-sD)/(uSigDepth*max(abs(D),0.1)+1e-3));
+      float wL=exp(-abs(lC-lum(sSig))/(sigL+1e-4));
+      float wk=kern[abs(x)]*kern[abs(y)];
+      float w=wN*wD*wL*wk;
+      sum+=sSig*w; wsum+=w; varSum+=sVar*w*w;
+    }
+  }
+  vec3 outSig = wsum>0.0 ? sum/wsum : signal;
+  vec3 outCol = (uDemod>0.5)? outSig*albS : outSig;
+  oColor=vec4(outCol, cC.a);
+  oVar=vec4(vec3(wsum>0.0?varSum/(wsum*wsum):var),1.0);
+}`;
+
+/* Simple joint-bilateral (single pass, alt denoiser) */
+const BILAT_FS = `#version 300 es
+precision highp float;
+in vec2 uv; out vec4 oColor;
+uniform sampler2D uColor,uNormal,uAlbedo;
+uniform vec2 uRes; uniform float uSigColor,uSigNormal,uSigDepth,uRadius;
+float lum(vec3 c){return dot(c,vec3(0.2126,0.7152,0.0722));}
+void main(){
+  vec4 cC=texture(uColor,uv); vec3 col=cC.rgb;
+  vec4 nC=texture(uNormal,uv); vec3 N=nC.xyz; float D=nC.w;
+  float lC=lum(col); int R=int(uRadius);
+  vec3 sum=vec3(0.); float ws=0.;
+  for(int y=-3;y<=3;y++)for(int x=-3;x<=3;x++){
+    if(abs(x)>R||abs(y)>R)continue;
+    vec2 su=uv+vec2(float(x),float(y))/uRes;
+    vec3 s=texture(uColor,su).rgb; vec4 sn=texture(uNormal,su);
+    float wS=exp(-float(x*x+y*y)/8.0);
+    float wN=pow(max(dot(N,sn.xyz),0.),uSigNormal);
+    float wD=exp(-abs(D-sn.w)/(uSigDepth+1e-3));
+    float wL=exp(-abs(lC-lum(s))/(uSigColor*0.3+0.02));
+    float w=wS*wN*wD*wL; sum+=s*w; ws+=w;
+  }
+  oColor=vec4(ws>0.?sum/ws:col, cC.a);
+}`;
+
+/* ============================================================
+   DISPLAY — tonemap + exposure + visualization modes
+   ============================================================ */
+const DISP_FS = `#version 300 es
+precision highp float;
+in vec2 uv; out vec4 frag;
+uniform sampler2D uColor, uRaw, uNormal, uAlbedo, uMoments;
+uniform float uExposure, uTonemap, uViz;
+vec3 aces(vec3 x){ return clamp((x*(2.51*x+0.03))/(x*(2.43*x+0.59)+0.14),0.,1.); }
+vec3 reinhard(vec3 x){ return x/(1.+x); }
+vec3 filmic(vec3 x){
+  // AgX-ish approximation
+  x=max(vec3(0.),x);
+  vec3 a=x*(x+0.0245786)-0.000090537;
+  vec3 b=x*(0.983729*x+0.4329510)+0.238081;
+  return clamp(a/b,0.,1.);
+}
+void main(){
+  int viz=int(uViz+0.5);
+  vec3 c;
+  if(viz==2){ c=texture(uNormal,uv).xyz*0.5+0.5; frag=vec4(c,1.); return; }
+  if(viz==3){ frag=vec4(pow(texture(uAlbedo,uv).rgb,vec3(1./2.2)),1.); return; }
+  if(viz==4){ float d=texture(uNormal,uv).w; float g=1.0-clamp(d/15.0,0.,1.); frag=vec4(vec3(g),1.); return; }
+  if(viz==5){ float v=texture(uMoments,uv).z; frag=vec4(vec3(clamp(v*6.0,0.,1.)),1.); return; }
+  vec3 hdr = (viz==1) ? texture(uRaw,uv).rgb : texture(uColor,uv).rgb;
+  hdr*=exp2(uExposure);
+  int tm=int(uTonemap+0.5);
+  if(tm==0)c=filmic(hdr);
+  else if(tm==1)c=aces(hdr);
+  else if(tm==2)c=pow(reinhard(hdr),vec3(1./2.2));
+  else c=pow(clamp(hdr,0.,1.),vec3(1./2.2));
+  frag=vec4(c,1.);
+}`;
+
+/* ---------- build programs ---------- */
+const P_PT=prog(VS,PT_FS), P_ACC=prog(VS,ACC_FS), P_AT=prog(VS,ATROUS_FS),
+      P_BL=prog(VS,BILAT_FS), P_DISP=prog(VS,DISP_FS);
+
+/* fullscreen quad */
+const quad=gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER,quad);
+gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,3,-1,-1,3]),gl.STATIC_DRAW);
+function bindQuad(p){ const l=gl.getAttribLocation(p,'p'); gl.bindBuffer(gl.ARRAY_BUFFER,quad);
+  gl.enableVertexAttribArray(l); gl.vertexAttribPointer(l,2,gl.FLOAT,false,0,0); }
+
+/* ---------- render targets ---------- */
+let W=1,H=1;
+function tex(w,h){ const t=gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D,t);
+  gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA16F,w,h,0,gl.RGBA,gl.FLOAT,null);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE); return t; }
+function fbo(...texs){ const f=gl.createFramebuffer(); gl.bindFramebuffer(gl.FRAMEBUFFER,f);
+  const at=[]; texs.forEach((t,i)=>{gl.framebufferTexture2D(gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT0+i,gl.TEXTURE_2D,t,0);at.push(gl.COLOR_ATTACHMENT0+i);});
+  gl.drawBuffers(at); return f; }
+
+let RT={};
+function allocRT(){
+  Object.values(RT).forEach(v=>{ if(v&&v.del)v.del(); });
+  const mk=()=>tex(W,H);
+  RT.ptColor=mk(); RT.ptNormal=mk(); RT.ptAlbedo=mk();
+  RT.ptFbo=fbo(RT.ptColor,RT.ptNormal,RT.ptAlbedo);
+  RT.accA=mk(); RT.accB=mk(); RT.momA=mk(); RT.momB=mk();
+  RT.accFboA=fbo(RT.accA,RT.momA); RT.accFboB=fbo(RT.accB,RT.momB);
+  RT.pingC=mk(); RT.pingV=mk(); RT.pongC=mk(); RT.pongV=mk();
+  RT.pingFbo=fbo(RT.pingC,RT.pingV); RT.pongFbo=fbo(RT.pongC,RT.pongV);
+  RT.cur=0;
+}
+
+/* ---------- camera ---------- */
+function camVectors(){
+  const cp=Math.cos(S.pitch),sp=Math.sin(S.pitch),cy=Math.cos(S.yaw),sy=Math.sin(S.yaw);
+  const dir=[cp*sy,sp,cp*cy];
+  const pos=[S.target[0]+dir[0]*S.dist, S.target[1]+dir[1]*S.dist, S.target[2]+dir[2]*S.dist];
+  const f=[-dir[0],-dir[1],-dir[2]];
+  let up=[0,1,0];
+  let r=[f[1]*up[2]-f[2]*up[1], f[2]*up[0]-f[0]*up[2], f[0]*up[1]-f[1]*up[0]];
+  let rl=Math.hypot(...r); r=r.map(v=>v/rl);
+  let u=[r[1]*f[2]-r[2]*f[1], r[2]*f[0]-r[0]*f[2], r[0]*f[1]-r[1]*f[0]];
+  const fov=Math.tan(0.5); // ~ fixed fov
+  return {pos,f:f.map(v=>v*fov*1.4),r:r.map(v=>v*fov),u:u.map(v=>v*fov)};
+}
+
+/* ---------- resize ---------- */
+function resize(){
+  const r=cv.getBoundingClientRect();
+  const dpr=Math.min(window.devicePixelRatio||1,2);
+  cv.width=Math.max(2,Math.floor(r.width*dpr));
+  cv.height=Math.max(2,Math.floor(r.height*dpr));
+  W=Math.max(2,Math.floor(cv.width*S.scale));
+  H=Math.max(2,Math.floor(cv.height*S.scale));
+  allocRT(); needReset=true;
+  document.getElementById('hRes').textContent=W+'×'+H+' ('+Math.round(S.scale*100)+'%)';
+}
+new ResizeObserver(()=>resize()).observe(cv);
+
+/* ---------- uniform helpers ---------- */
+function u(p,n){ return gl.getUniformLocation(p,n); }
+
+/* ---------- render loop ---------- */
+function render(){
+  const now=performance.now();
+  const dt=now-lastTime; lastTime=now; fps=fps*0.9+ (1000/Math.max(dt,1))*0.1;
+
+  const cam=camVectors();
+  const reset = needReset?1:0;
+  if(needReset){ spp=0; needReset=false; RT.cur=0; }
+
+  gl.viewport(0,0,W,H);
+  // ---- 1. path trace ----
+  gl.bindFramebuffer(gl.FRAMEBUFFER,RT.ptFbo);
+  gl.useProgram(P_PT); bindQuad(P_PT);
+  gl.uniform2f(u(P_PT,'uRes'),W,H);
+  gl.uniform1f(u(P_PT,'uFrame'),frame);
+  gl.uniform1f(u(P_PT,'uSpf'),S.spf);
+  gl.uniform1f(u(P_PT,'uBounces'),S.bounces);
+  gl.uniform3fv(u(P_PT,'uCamPos'),cam.pos);
+  gl.uniform3fv(u(P_PT,'uCamF'),cam.f);
+  gl.uniform3fv(u(P_PT,'uCamR'),cam.r);
+  gl.uniform3fv(u(P_PT,'uCamU'),cam.u);
+  gl.uniform1f(u(P_PT,'uRough'),S.roughness);
+  gl.uniform1f(u(P_PT,'uMetal'),S.metallic);
+  gl.uniform3fv(u(P_PT,'uBase'),S.baseColor);
+  gl.uniform1f(u(P_PT,'uLightPow'),S.lightPow);
+  gl.uniform1f(u(P_PT,'uEnvPow'),S.envPow);
+  gl.uniform1f(u(P_PT,'uFloorRef'),S.floorRef);
+  gl.drawArrays(gl.TRIANGLES,0,3);
+
+  // ---- 2. accumulate (temporal) ----
+  const srcAcc = RT.cur===0?{c:RT.accB,m:RT.momB}:{c:RT.accA,m:RT.momA};
+  const dstFbo = RT.cur===0?RT.accFboA:RT.accFboB;
+  const dst    = RT.cur===0?{c:RT.accA,m:RT.momA}:{c:RT.accB,m:RT.momB};
+  gl.bindFramebuffer(gl.FRAMEBUFFER,dstFbo);
+  gl.useProgram(P_ACC); bindQuad(P_ACC);
+  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D,RT.ptColor); gl.uniform1i(u(P_ACC,'uNew'),0);
+  gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D,srcAcc.c); gl.uniform1i(u(P_ACC,'uHistC'),1);
+  gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D,srcAcc.m); gl.uniform1i(u(P_ACC,'uHistM'),2);
+  gl.activeTexture(gl.TEXTURE3); gl.bindTexture(gl.TEXTURE_2D,RT.ptNormal); gl.uniform1i(u(P_ACC,'uNormal'),3);
+  gl.uniform1f(u(P_ACC,'uReset'),reset);
+  gl.uniform1f(u(P_ACC,'uTemporal'),S.temporal?1:0);
+  gl.uniform1f(u(P_ACC,'uTempAlpha'),S.tempAlpha);
+  gl.uniform1f(u(P_ACC,'uFirefly'),S.firefly?1:0);
+  gl.uniform1f(u(P_ACC,'uFrame'),frame);
+  gl.uniform2f(u(P_ACC,'uRes'),W,H);
+  gl.drawArrays(gl.TRIANGLES,0,3);
+  RT.cur^=1;
+
+  // accumulated color/moments now in dst
+  let finalColorTex=dst.c;
+
+  // ---- 3. spatial denoise ----
+  if(S.denoise && S.denoiser!=='none'){
+    if(S.denoiser==='bilateral'){
+      gl.bindFramebuffer(gl.FRAMEBUFFER,RT.pingFbo);
+      gl.useProgram(P_BL); bindQuad(P_BL);
+      gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D,dst.c); gl.uniform1i(u(P_BL,'uColor'),0);
+      gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D,RT.ptNormal); gl.uniform1i(u(P_BL,'uNormal'),1);
+      gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D,RT.ptAlbedo); gl.uniform1i(u(P_BL,'uAlbedo'),2);
+      gl.uniform2f(u(P_BL,'uRes'),W,H);
+      gl.uniform1f(u(P_BL,'uSigColor'),S.sigColor);
+      gl.uniform1f(u(P_BL,'uSigNormal'),S.sigNormal);
+      gl.uniform1f(u(P_BL,'uSigDepth'),S.sigDepth);
+      gl.uniform1f(u(P_BL,'uRadius'),3);
+      gl.drawArrays(gl.TRIANGLES,0,3);
+      finalColorTex=RT.pingC;
+    } else {
+      // À-Trous / SVGF: iterate with increasing step
+      const iters=S.atrousIter;
+      let inC=dst.c, inV=dst.m;
+      let src=dst.c;
+      let ping=true;
+      for(let i=0;i<iters;i++){
+        const fboT = ping?RT.pingFbo:RT.pongFbo;
+        gl.bindFramebuffer(gl.FRAMEBUFFER,fboT);
+        gl.useProgram(P_AT); bindQuad(P_AT);
+        gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D,src); gl.uniform1i(u(P_AT,'uColor'),0);
+        gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D,RT.ptNormal); gl.uniform1i(u(P_AT,'uNormal'),1);
+        gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D,RT.ptAlbedo); gl.uniform1i(u(P_AT,'uAlbedo'),2);
+        gl.activeTexture(gl.TEXTURE3); gl.bindTexture(gl.TEXTURE_2D,dst.m); gl.uniform1i(u(P_AT,'uMoments'),3);
+        gl.uniform2f(u(P_AT,'uRes'),W,H);
+        gl.uniform1f(u(P_AT,'uStep'),Math.pow(2,i));
+        gl.uniform1f(u(P_AT,'uSigColor'),S.denoiser==='svgf'?S.sigColor:S.sigColor*0.6);
+        gl.uniform1f(u(P_AT,'uSigNormal'),S.sigNormal);
+        gl.uniform1f(u(P_AT,'uSigDepth'),S.sigDepth);
+        gl.uniform1f(u(P_AT,'uUseVar'),S.denoiser==='svgf'?1:0);
+        gl.uniform1f(u(P_AT,'uDemod'),S.demod?1:0);
+        gl.drawArrays(gl.TRIANGLES,0,3);
+        src = ping?RT.pingC:RT.pongC;
+        ping=!ping;
+      }
+      finalColorTex=src;
+    }
+  }
+
+  // ---- 4. display to screen ----
+  gl.bindFramebuffer(gl.FRAMEBUFFER,null);
+  gl.viewport(0,0,cv.width,cv.height);
+  gl.useProgram(P_DISP); bindQuad(P_DISP);
+  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D,finalColorTex); gl.uniform1i(u(P_DISP,'uColor'),0);
+  gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D,dst.c); gl.uniform1i(u(P_DISP,'uRaw'),1);
+  gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D,RT.ptNormal); gl.uniform1i(u(P_DISP,'uNormal'),2);
+  gl.activeTexture(gl.TEXTURE3); gl.bindTexture(gl.TEXTURE_2D,RT.ptAlbedo); gl.uniform1i(u(P_DISP,'uAlbedo'),3);
+  gl.activeTexture(gl.TEXTURE4); gl.bindTexture(gl.TEXTURE_2D,dst.m); gl.uniform1i(u(P_DISP,'uMoments'),4);
+  gl.uniform1f(u(P_DISP,'uExposure'),S.exposure);
+  gl.uniform1f(u(P_DISP,'uTonemap'),S.tonemap);
+  gl.uniform1f(u(P_DISP,'uViz'),S.viz);
+  gl.drawArrays(gl.TRIANGLES,0,3);
+
+  frame++;
+  spp += S.spf;
+  if(spp>S.maxspp) spp=S.maxspp;
+  else if(spp<S.maxspp) needResetSoft(); // keep converging
+
+  updateStats();
+  requestAnimationFrame(render);
+}
+function needResetSoft(){ /* keeps rendering next frames until maxspp */ }
+
+function updateStats(){
+  document.getElementById('sTop').textContent=Math.min(spp,S.maxspp);
+  document.getElementById('fpsTop').textContent=Math.round(fps);
+  document.getElementById('dTop').textContent = S.denoise?(S.denoiser==='svgf'?'SVGF':S.denoiser==='atrous'?'À-Trous':S.denoiser==='bilateral'?'Bilateral':'Off'):'Off';
+  const conv=Math.min(100,Math.round(spp/S.maxspp*100));
+  document.getElementById('hConv').textContent=conv+'%';
+  document.getElementById('prog').style.width=conv+'%';
+  const dot=document.getElementById('fDot');
+  if(conv>=100){ dot.classList.add('ok'); document.getElementById('fStatus').textContent='渲染完成 · 已收敛 · '+S.maxspp+' spp'; }
+  else { dot.classList.remove('ok'); document.getElementById('fStatus').textContent='渲染中 · '+Math.min(spp,S.maxspp)+' / '+S.maxspp+' spp'; }
+  const vizNames=['最终合成','噪声原图','法线 G-Buffer','反照率 G-Buffer','深度','方差 / 噪声'];
+  document.getElementById('hViz').textContent=vizNames[S.viz]||'最终合成';
+}
+
+/* ============================================================
+   INTERACTION
+   ============================================================ */
+let dragging=false, panning=false, lx=0, ly=0;
+cv.addEventListener('mousedown',e=>{
+  if(e.button===2){ panning=true; } else { dragging=true; cv.classList.add('dragging'); }
+  lx=e.clientX; ly=e.clientY;
+});
+window.addEventListener('mouseup',()=>{ dragging=false; panning=false; cv.classList.remove('dragging'); });
+window.addEventListener('mousemove',e=>{
+  if(!dragging && !panning)return;
+  const dx=e.clientX-lx, dy=e.clientY-ly; lx=e.clientX; ly=e.clientY;
+  if(dragging){
+    S.yaw-=dx*0.006; S.pitch=Math.max(-1.4,Math.min(1.4,S.pitch+dy*0.006));
+  } else if(panning){
+    const cam=camVectors();
+    const sc=S.dist*0.0015;
+    for(let i=0;i<3;i++){ S.target[i]-= (cam.r[i]*dx - cam.u[i]*dy)*sc*3.0; }
+  }
+  needReset=true;
+});
+cv.addEventListener('wheel',e=>{ e.preventDefault(); S.dist=Math.max(1.5,Math.min(20,S.dist*(1+Math.sign(e.deltaY)*0.08))); needReset=true; },{passive:false});
+cv.addEventListener('contextmenu',e=>e.preventDefault());
+
+/* ============================================================
+   UI WIRING
+   ============================================================ */
+// tabs
+document.querySelectorAll('.tab').forEach(t=>t.addEventListener('click',()=>{
+  document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
+  t.classList.add('active');
+  document.querySelectorAll('[data-panel]').forEach(p=>p.style.display='none');
+  document.querySelector('[data-panel="'+t.dataset.tab+'"]').style.display='block';
+}));
+// collapsibles
+document.querySelectorAll('.sec-h').forEach(h=>{
+  const tri=document.createElement('span'); tri.className='tri'; tri.textContent='▾'; tri.style.marginRight='2px';
+  h.insertBefore(tri,h.firstChild);
+  h.addEventListener('click',()=>h.classList.toggle('collapsed'));
+});
+
+function bindRange(id,key,fmt,onchange){
+  const el=document.getElementById(id), out=document.getElementById(id+'V');
+  const upd=()=>{ let v=parseFloat(el.value); S[key]=v; if(out)out.textContent=fmt?fmt(v):v;
+    if(onchange)onchange(v); };
+  el.addEventListener('input',()=>{ upd(); if(['spf','maxspp','bounces','roughness','metallic','lightPow','envPow','floorRef'].includes(key)) needReset=true; });
+  upd();
+}
+bindRange('spf','spf',v=>v);
+bindRange('maxspp','maxspp',v=>v);
+bindRange('bounces','bounces',v=>v);
+bindRange('exposure','exposure',v=>v.toFixed(2));
+bindRange('atrousIter','atrousIter',v=>v);
+bindRange('sigColor','sigColor',v=>v.toFixed(1));
+bindRange('sigNormal','sigNormal',v=>v);
+bindRange('sigDepth','sigDepth',v=>v.toFixed(2));
+bindRange('tempAlpha','tempAlpha',v=>v.toFixed(2));
+bindRange('roughness','roughness',v=>v.toFixed(2));
+bindRange('metallic','metallic',v=>v.toFixed(2));
+bindRange('lightPow','lightPow',v=>v.toFixed(1));
+bindRange('envPow','envPow',v=>v.toFixed(2));
+bindRange('floorRef','floorRef',v=>v.toFixed(2));
+
+document.getElementById('tonemap').addEventListener('change',e=>S.tonemap=+e.target.value);
+document.getElementById('denoiser').addEventListener('change',e=>{S.denoiser=e.target.value;});
+document.getElementById('viz').addEventListener('change',e=>S.viz=+e.target.value);
+
+function bindToggle(id,key,onchange){
+  const el=document.getElementById(id), sw=el.querySelector('.switch');
+  el.addEventListener('click',()=>{ S[key]=!S[key]; el.classList.toggle('on',S[key]); sw.classList.toggle('on',S[key]);
+    if(onchange)onchange(S[key]); });
+}
+bindToggle('tgDenoise','denoise');
+bindToggle('tgTemporal','temporal',()=>needReset=true);
+bindToggle('tgFirefly','firefly');
+bindToggle('tgDemod','demod');
+bindToggle('tgAdaptive','adaptive');
+
+// scale buttons
+document.querySelectorAll('[data-scale]').forEach(b=>b.addEventListener('click',()=>{
+  document.querySelectorAll('[data-scale]').forEach(x=>x.classList.remove('sel'));
+  b.classList.add('sel'); S.scale=parseFloat(b.dataset.scale); resize();
+}));
+
+// swatches
+const colors=[[0.85,0.28,0.22],[0.95,0.75,0.2],[0.3,0.7,0.35],[0.25,0.55,0.85],[0.7,0.35,0.85],[0.9,0.9,0.9],[0.1,0.1,0.12],[0.85,0.5,0.3]];
+const sw=document.getElementById('swatches');
+colors.forEach((c,i)=>{ const d=document.createElement('div'); d.className='sw'+(i===0?' sel':'');
+  d.style.background='rgb('+c.map(v=>Math.round(Math.pow(v,1/2.2)*255)).join(',')+')';
+  d.addEventListener('click',()=>{ document.querySelectorAll('.sw').forEach(x=>x.classList.remove('sel')); d.classList.add('sel');
+    S.baseColor=c.slice(); needReset=true; });
+  sw.appendChild(d);
+});
+
+document.getElementById('btnReset').addEventListener('click',()=>{ S.yaw=0.7;S.pitch=0.35;S.dist=6.5;S.target=[0,0.6,0]; needReset=true; toast('相机已重置'); });
+document.getElementById('btnRender').addEventListener('click',()=>{ needReset=true; toast('重新开始渲染'); });
+document.getElementById('btnSave').addEventListener('click',()=>{
+  const a=document.createElement('a'); a.download='blender-web-render.png'; a.href=cv.toDataURL('image/png'); a.click(); toast('已保存 PNG');
+});
+
+// keyboard
+window.addEventListener('keydown',e=>{
+  if(e.key==='1'){document.getElementById('viz').value='0';S.viz=0;}
+  if(e.key==='2'){document.getElementById('viz').value='1';S.viz=1;toast('查看噪声原图');}
+  if(e.key==='d'){document.getElementById('tgDenoise').click();toast('降噪 '+(S.denoise?'开':'关'));}
+  if(e.key==='r'){needReset=true;}
+});
+
+/* ---------- go ---------- */
+resize();
+document.getElementById('fStatus').textContent='就绪 · GPU 路径追踪运行中';
+requestAnimationFrame(render);
+</script>
+</body>
+</html>
