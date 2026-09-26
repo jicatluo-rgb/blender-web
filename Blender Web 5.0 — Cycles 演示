@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Blender Web 5.0 — Cycles 演示</title>
+<script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+<style>
+:root{--bg0:#111;--bg1:#181818;--hdr:#242424;--pnl:#282828;--sub:#2d2d2d;--inp:#1d1d1d;--bd:#141414;--tx:#dcdcdc;--dim:#8c8c8c;--blue:#4772b3;--orange:#ff8c00}
+*{box-sizing:border-box;user-select:none}
+body{margin:0;background:var(--bg0);color:var(--tx);font:11.5px -apple-system,"Segoe UI","Microsoft YaHei",sans-serif;overflow:hidden;height:100vh}
+::-webkit-scrollbar{width:5px}::-webkit-scrollbar-thumb{background:#4a4a4a;border-radius:3px}
+.ws-tab{padding:0 9px;height:24px;display:flex;align-items:center;color:#9e9e9e;cursor:pointer;border-radius:4px 4px 0 0;margin-top:3px}
+.ws-tab.active{background:var(--hdr);color:#fff;box-shadow:inset 0 2px 0 var(--blue)}
+.sec{background:var(--sub);border-radius:5px;margin:6px;overflow:hidden;border:1px solid #1f1f1f}
+.sec>h3{margin:0;padding:6px 8px;font-size:11.5px;font-weight:600;display:flex;align-items:center;gap:6px;cursor:pointer;background:#303030}
+.sec>h3 .chev{transition:transform .15s;font-size:9px;color:#aaa}
+.sec.closed>h3 .chev{transform:rotate(-90deg)}.sec.closed>.body{display:none}
+.body{padding:6px 8px 8px;display:flex;flex-direction:column;gap:5px}
+.row{display:grid;grid-template-columns:92px 1fr;align-items:center;gap:6px}
+.row>label{color:#bbb;text-align:right;font-size:11px}
+.slider{position:relative;height:20px;background:#545454;border-radius:4px;cursor:ew-resize;overflow:hidden;border:1px solid #1a1a1a}
+.slider .fill{position:absolute;inset:0 auto 0 0;background:var(--blue)}
+.slider span{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font:11px Consolas,monospace;color:#fff;pointer-events:none}
+.slider:hover{filter:brightness(1.12)}
+select{background:#282828;color:#eee;border:1px solid #1a1a1a;border-radius:4px;height:21px;font-size:11px;padding:0 4px;outline:none}
+.chk{display:flex;align-items:center;gap:6px;cursor:pointer;color:#ddd}
+.chk input{accent-color:var(--blue)}
+.btn{background:#383838;border:1px solid #191919;color:#ddd;border-radius:4px;height:22px;padding:0 8px;display:inline-flex;align-items:center;gap:5px;cursor:pointer;font-size:11px}
+.btn:hover{background:#484848;color:#fff}.btn.active{background:var(--blue);color:#fff}
+.badge{background:var(--orange);color:#111;border-radius:3px;padding:0 4px;font-size:9.5px;font-weight:700}
+.hud{position:absolute;background:rgba(20,20,20,.72);backdrop-filter:blur(4px);border:1px solid rgba(255,255,255,.06);border-radius:5px;padding:5px 8px;font:11px Consolas,monospace;pointer-events:none}
+#divider{position:absolute;top:0;bottom:0;width:2px;background:#ff8c00;cursor:ew-resize;display:none}
+#divider::after{content:"⇆";position:absolute;top:50%;left:-11px;width:24px;height:24px;border-radius:50%;background:#ff8c00;color:#111;display:flex;align-items:center;justify-content:center;font-weight:700;transform:translateY(-50%)}
+#divider .l,#divider .r{position:absolute;top:8px;font:10px sans-serif;background:rgba(0,0,0,.6);padding:2px 5px;border-radius:3px;white-space:nowrap}
+#divider .l{right:8px}#divider .r{left:8px}
+.prog{height:3px;background:#222}.prog>div{height:100%;background:linear-gradient(90deg,var(--blue),#6ea0ff);width:0;transition:width .1s}
+kbd{background:#3a3a3a;border:1px solid #222;border-radius:3px;padding:0 4px;font-size:10px}
+#toast{position:absolute;left:50%;bottom:40px;transform:translateX(-50%);opacity:0;transition:opacity .25s}
+</style>
+</head>
+<body class="flex flex-col">
+<!-- Top bar -->
+<div class="flex items-center gap-1 px-2 h-[28px] bg-[var(--bg1)] border-b border-black shrink-0">
+  <i class="fa-brands fa-blender text-[var(--orange)] text-[15px] mr-2"></i>
+  <span class="px-2 text-[#bbb]">文件</span><span class="px-2 text-[#bbb]">编辑</span><span class="px-2 text-[#bbb]">渲染</span><span class="px-2 text-[#bbb]">窗口</span>
+  <div class="flex ml-4 h-full"><div class="ws-tab">Layout</div><div class="ws-tab">Shading</div><div class="ws-tab active">Rendering</div></div>
+  <div class="ml-auto flex items-center gap-2">
+    <span class="text-[var(--dim)]">引擎</span><span class="btn active"><i class="fa-solid fa-sun"></i>Cycles (GPU)</span>
+  </div>
+</div>
+
+<div class="flex flex-1 min-h-0">
+  <!-- Viewport -->
+  <div id="vp" class="relative flex-1 bg-black overflow-hidden">
+    <canvas id="c" class="absolute inset-0 w-full h-full" style="image-rendering:auto"></canvas>
+    <div id="divider"><span class="l">原始噪点</span><span class="r">降噪后</span></div>
+    <div class="hud left-2 top-2" id="hud">…</div>
+    <div class="hud right-2 top-2 text-right" id="hud2"></div>
+    <div class="absolute left-2 bottom-2 flex gap-1" style="pointer-events:auto">
+      <span class="btn" id="bDen" title="D"><i class="fa-solid fa-wand-magic-sparkles"></i>降噪</span>
+      <span class="btn" id="bCmp" title="C"><i class="fa-solid fa-table-columns"></i>对比</span>
+      <span class="btn" id="bPause" title="空格"><i class="fa-solid fa-pause"></i></span>
+      <span class="btn" id="bReset" title="R"><i class="fa-solid fa-rotate"></i></span>
+      <span class="btn" id="bSave" title="F12"><i class="fa-solid fa-camera"></i>保存</span>
+    </div>
+    <div id="toast" class="hud"></div>
+  </div>
+
+  <!-- Properties -->
+  <div class="w-[300px] bg-[var(--pnl)] border-l border-black overflow-y-auto shrink-0">
+    <div class="px-2 py-1.5 bg-[var(--hdr)] flex items-center gap-2 text-[#ccc] border-b border-black"><i class="fa-solid fa-camera-retro"></i>渲染属性</div>
+    <div class="prog"><div id="prog"></div></div>
+
+    <div class="sec"><h3><i class="fa-solid fa-chevron-down chev"></i>采样</h3><div class="body">
+      <div class="row"><label>最大采样</label><div class="slider" data-k="maxSpp" data-min="16" data-max="4096" data-step="16" data-int="1"></div></div>
+      <div class="row"><label>每帧采样</label><div class="slider" data-k="spf" data-min="1" data-max="8" data-step="1" data-int="1"></div></div>
+      <div class="row"><label>渲染比例</label><select id="scale"><option value="0.5">50%</option><option value="0.75">75%</option><option value="1" selected>100%</option></select></div>
+      <label class="chk"><input type="checkbox" id="nee" checked>直接光采样 (NEE, 降低噪点)</label>
+    </div></div>
+
+    <div class="sec"><h3><i class="fa-solid fa-chevron-down chev"></i>光程</h3><div class="body">
+      <div class="row"><label>最大反弹</label><div class="slider" data-k="bounces" data-min="1" data-max="12" data-step="1" data-int="1"></div></div>
+      <div class="row"><label>萤火虫钳制</label><div class="slider" data-k="clamp" data-min="1" data-max="50" data-step="0.5"></div></div>
+      <div class="row"><label>灯光强度</label><div class="slider" data-k="light" data-min="1" data-max="80" data-step="1"></div></div>
+      <div class="row"><label>天空强度</label><div class="slider" data-k="sky" data-min="0" data-max="3" data-step="0.05"></div></div>
+    </div></div>
+
+    <div class="sec" style="border-color:#4772b3"><h3><i class="fa-solid fa-chevron-down chev"></i><i class="fa-solid fa-wand-magic-sparkles text-[#6ea0ff]"></i>降噪 <span class="badge">增强</span></h3><div class="body">
+      <label class="chk"><input type="checkbox" id="denOn" checked>启用降噪 (视口 + 渲染)</label>
+      <div class="row"><label>降噪器</label><select id="preset">
+        <option value="fast">快速 (3 次 À-Trous)</option>
+        <option value="hq" selected>高质量 SVGF (5 次)</option>
+        <option value="ultra">极致 (6 次 + 预滤波)</option></select></div>
+      <div class="row"><label>强度 σL</label><div class="slider" data-k="sL" data-min="0.5" data-max="12" data-step="0.1"></div></div>
+      <div class="row"><label>法线保边 σN</label><div class="slider" data-k="sN" data-min="4" data-max="256" data-step="4" data-int="1"></div></div>
+      <div class="row"><label>深度保边 σZ</label><div class="slider" data-k="sZ" data-min="0.1" data-max="5" data-step="0.1"></div></div>
+      <div class="row"><label>细节回混</label><div class="slider" data-k="detail" data-min="0" data-max="0.5" data-step="0.01"></div></div>
+      <label class="chk"><input type="checkbox" id="albedoDemod" checked>反照率解调 (保留纹理)</label>
+      <label class="chk"><input type="checkbox" id="adaptive" checked>自适应方差 (随采样收敛)</label>
+      <div class="text-[10.5px] text-[var(--dim)] leading-4 mt-1">使用法线、深度、反照率 G-Buffer 做引导，基于方差的边缘保持小波滤波。采样很少时也能得到干净画面，采样越多滤波越弱，细节越清晰。</div>
+    </div></div>
+
+    <div class="sec"><h3><i class="fa-solid fa-chevron-down chev"></i>色彩管理</h3><div class="body">
+      <div class="row"><label>曝光</label><div class="slider" data-k="exposure" data-min="-3" data-max="3" data-step="0.05"></div></div>
+      <div class="row"><label>视图变换</label><select id="tone"><option value="0" selected>AgX 风格</option><option value="1">ACES</option><option value="2">标准</option></select></div>
+      <div class="row"><label>显示通道</label><select id="pass">
+        <option value="0">合成</option><option value="1">噪点 (原始)</option><option value="2">法线</option><option value="3">反照率</option><option value="4">方差</option><option value="5">深度</option></select></div>
+    </div></div>
+
+    <div class="sec closed"><h3><i class="fa-solid fa-chevron-down chev"></i>快捷键</h3><div class="body text-[#bbb] leading-5">
+      <div><kbd>左键拖动</kbd> 环绕 <kbd>右键/Shift</kbd> 平移 <kbd>滚轮</kbd> 缩放</div>
+      <div><kbd>D</kbd> 降噪开关 <kbd>C</kbd> 对比 <kbd>空格</kbd> 暂停</div>
+      <div><kbd>R</kbd> 重新渲染 <kbd>F12</kbd> 保存 PNG <kbd>1-6</kbd> 通道</div>
+    </div></div>
+  </div>
+</div>
+<div class="h-[22px] bg-[var(--bg1)] border-t border-black flex items-center px-2 gap-4 text-[var(--dim)] shrink-0 text-[11px]">
+  <span id="st1">就绪</span><span class="ml-auto" id="st2"></span><span>Blender Web 5.0 · 降噪增强</span>
+</div>
+
+<script>
+const S={maxSpp:1024,spf:1,bounces:5,clamp:10,light:22,sky:0.6,sL:4,sN:128,sZ:1,detail:0.05,exposure:0};
+const cv=document.getElementById('c');
+const gl=cv.getContext('webgl2',{preserveDrawingBuffer:true,antialias:false});
+if(!gl||!gl.getExtension('EXT_color_buffer_float')){document.getElementById('hud').textContent='需要 WebGL2 + 浮点渲染支持';throw 0;}
+
+const VS=`#version 300 es
+void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.-1.,0,1);}`;
+
+const TRACE=`#version 300 es
+precision highp float;precision highp int;
+uniform sampler2D uP0,uP1,uP2,uP3;uniform vec2 uRes;uniform int uFrame,uBounces,uReset,uNee;
+uniform vec3 uCP,uCF,uCR,uCU;uniform float uFov,uClamp,uSky,uLI;
+layout(location=0)out vec4 o0;layout(location=1)out vec4 o1;layout(location=2)out vec4 o2;layout(location=3)out vec4 o3;
+uint sd;uint pcg(uint v){uint s=v*747796405u+2891336453u;uint w=((s>>((s>>28u)+4u))^s)*277803737u;return(w>>22u)^w;}
+float rnd(){sd=pcg(sd);return float(sd)/4294967296.;}
+const float PI=3.14159265;
+const vec4 SP[6]=vec4[6](vec4(0,1,0.6,1),vec4(-2.3,.75,.9,.75),vec4(2.2,.85,.3,.85),vec4(.9,.4,2.1,.4),vec4(-.9,.35,2.4,.35),vec4(-1.4,4.3,1.6,.55));
+const vec3 SC[6]=vec3[6](vec3(1),vec3(.8,.12,.1),vec3(1.,.72,.3),vec3(.15,.35,.85),vec3(.95),vec3(1));
+const int SM[6]=int[6](2,0,1,0,1,3);const float SRo[6]=float[6](0.,0.,.28,0.,.02,0.);
+struct H{float t;vec3 n;vec3 a;int m;float r;int id;};
+vec3 sky(vec3 d){return mix(vec3(.03,.03,.04),vec3(.35,.5,.8),clamp(d.y*.8+.2,0.,1.))*uSky;}
+float iS(vec3 o,vec3 d,vec4 s){vec3 oc=o-s.xyz;float b=dot(oc,d),c=dot(oc,oc)-s.w*s.w,h=b*b-c;if(h<0.)return -1.;h=sqrt(h);float t=-b-h;if(t>1e-3)return t;t=-b+h;return t>1e-3?t:-1.;}
+H scene(vec3 o,vec3 d){H h;h.t=1e9;h.id=-1;
+ for(int i=0;i<6;i++){float t=iS(o,d,SP[i]);if(t>0.&&t<h.t){h.t=t;h.id=i;h.n=normalize(o+d*t-SP[i].xyz);h.a=SC[i];h.m=SM[i];h.r=SRo[i];}}
+ // floor
+ if(d.y<0.){float t=-o.y/d.y;if(t>1e-3&&t<h.t){h.t=t;h.id=10;h.n=vec3(0,1,0);vec3 p=o+d*t;float ch=mod(floor(p.x)+floor(p.z),2.);h.a=mix(vec3(.75),vec3(.35),ch);h.m=0;h.r=0.;}}
+ // back wall z=-2.5 (single sided)
+ if(d.z<0.){float t=(-2.5-o.z)/d.z;if(t>1e-3&&t<h.t){vec3 p=o+d*t;if(p.y>0.&&p.y<6.){h.t=t;h.id=11;h.n=vec3(0,0,1);h.a=vec3(.8,.78,.72);h.m=0;h.r=0.;}}}
+ // left wall x=-4.5
+ if(d.x<0.){float t=(-4.5-o.x)/d.x;if(t>1e-3&&t<h.t){vec3 p=o+d*t;if(p.y>0.&&p.y<6.&&p.z>-2.5){h.t=t;h.id=12;h.n=vec3(1,0,0);h.a=vec3(.25,.6,.3);h.m=0;h.r=0.;}}}
+ return h;}
+vec3 cosH(vec3 n){float r1=rnd(),r2=rnd();float ph=2.*PI*r1,r=sqrt(r2);vec3 t=normalize(abs(n.x)>.5?cross(n,vec3(0,1,0)):cross(n,vec3(1,0,0)));vec3 b=cross(n,t);return normalize(t*cos(ph)*r+b*sin(ph)*r+n*sqrt(1.-r2));}
+float lum(vec3 c){return dot(c,vec3(.2126,.7152,.0722));}
+void main(){ivec2 px=ivec2(gl_FragCoord.xy);
+ sd=uint(px.x)*1973u+uint(px.y)*9277u+uint(uFrame)*26699u;sd=pcg(sd);
+ vec2 uv=(gl_FragCoord.xy+vec2(rnd(),rnd())-.5*uRes)/uRes.y;
+ vec3 ro=uCP,rd=normalize(uCF*uFov+uCR*uv.x+uCU*uv.y);
+ vec3 L=vec3(0),T=vec3(1);vec3 gN=-rd,gA=vec3(1);float gZ=1e3;bool spec=true;
+ vec3 Le=vec3(1.,.88,.72)*uLI;
+ for(int b=0;b<12;b++){if(b>=uBounces)break;
+  H h=scene(ro,rd);
+  if(h.id<0){vec3 c=T*sky(rd);if(b>0&&lum(c)>uClamp)c*=uClamp/lum(c);L+=c;if(b==0){gA=vec3(1);}break;}
+  if(b==0){gN=h.n;gZ=h.t;gA=(h.m==0||h.m==1)?h.a:vec3(1);}
+  vec3 p=ro+rd*h.t;vec3 n=h.n;
+  if(h.m==3){if(spec||uNee==0){vec3 c=T*Le;if(b>0&&lum(c)>uClamp)c*=uClamp/lum(c);L+=c;}break;}
+  if(h.m==0){
+   if(uNee==1){ // sample sphere light (cone)
+    vec4 ls=SP[5];vec3 w=ls.xyz-p;float d2=dot(w,w);w=normalize(w);
+    float cm=sqrt(max(0.,1.-ls.w*ls.w/d2));float u1=rnd(),u2=rnd();float ct=1.-u1*(1.-cm),st=sqrt(1.-ct*ct),ph=2.*PI*u2;
+    vec3 t=normalize(abs(w.x)>.5?cross(w,vec3(0,1,0)):cross(w,vec3(1,0,0)));vec3 bb=cross(w,t);
+    vec3 ld=normalize(t*cos(ph)*st+bb*sin(ph)*st+w*ct);float nl=dot(n,ld);
+    if(nl>0.){H s=scene(p+n*1e-3,ld);if(s.id==5){vec3 c=T*h.a/PI*Le*nl*(2.*PI*(1.-cm));if(b>0&&lum(c)>uClamp)c*=uClamp/lum(c);L+=c;}}
+   }
+   T*=h.a;rd=cosH(n);ro=p+n*1e-3;spec=false;
+  }else if(h.m==1){
+   vec3 r=reflect(rd,n);rd=normalize(r+h.r*(cosH(n)-n)*1.);if(dot(rd,n)<0.)rd=r;T*=h.a;ro=p+n*1e-3;spec=true;
+  }else{
+   float eta=1.5;bool fr=dot(rd,n)<0.;vec3 nn=fr?n:-n;float ei=fr?1./eta:eta;
+   float c=min(dot(-rd,nn),1.);float r0=(1.-eta)/(1.+eta);r0*=r0;float F=r0+(1.-r0)*pow(1.-c,5.);
+   vec3 rf=refract(rd,nn,ei);
+   if(rnd()<F||dot(rf,rf)<1e-6){rd=reflect(rd,nn);ro=p+nn*1e-3;}else{rd=rf;ro=p-nn*1e-3;}
+   spec=true;
+  }
+  if(b>2){float q=max(.05,1.-max(T.r,max(T.g,T.b)));if(rnd()<q)break;T/=1.-q;}
+ }
+ if(any(isnan(L)))L=vec3(0);
+ vec3 dm=L/max(gA,vec3(.02));float l=lum(dm);
+ vec4 p0=vec4(0),p1=vec4(0),p2=vec4(0),p3=vec4(0);
+ if(uReset==0){p0=texelFetch(uP0,px,0);p1=texelFetch(uP1,px,0);p2=texelFetch(uP2,px,0);p3=texelFetch(uP3,px,0);}
+ o0=p0+vec4(dm,1);o1=p1+vec4(l,l*l,0,0);o2=p2+vec4(gN,gZ);o3=p3+vec4(gA,1);
+}`;
+
+// Prep: mean demod color + variance (temporal + spatial fallback), and averaged G-buffer
+const PREP=`#version 300 es
+precision highp float;
+uniform sampler2D uA0,uA1,uA2;uniform int uAdaptive;uniform float uPre;
+layout(location=0)out vec4 oC;layout(location=1)out vec4 oG;
+float lum(vec3 c){return dot(c,vec3(.2126,.7152,.0722));}
+void main(){ivec2 p=ivec2(gl_FragCoord.xy);ivec2 sz=textureSize(uA0,0);
+ vec4 a0=texelFetch(uA0,p,0);float n=max(a0.a,1.);vec3 m=a0.rgb/n;
+ vec4 a1=texelFetch(uA1,p,0);float m1=a1.x/n,m2=a1.y/n;float tv=max(m2-m1*m1,0.)/n;
+ vec4 g=texelFetch(uA2,p,0);vec3 N=normalize(g.xyz/n+1e-6);float Z=g.w/n;
+ float w=clamp((n-1.)/7.,0.,1.);float v=tv;
+ if(w<1.||uPre>0.){ // spatial variance estimate
+  float s1=0.,s2=0.,ws=0.;vec3 cs=vec3(0);
+  for(int j=-3;j<=3;j++)for(int i=-3;i<=3;i++){ivec2 q=clamp(p+ivec2(i,j),ivec2(0),sz-1);
+   vec4 b0=texelFetch(uA0,q,0);vec3 c=b0.rgb/max(b0.a,1.);vec4 bg=texelFetch(uA2,q,0);float bn=max(b0.a,1.);
+   float ww=pow(max(dot(N,normalize(bg.xyz/bn+1e-6)),0.),32.)*exp(-abs(Z-bg.w/bn)/(Z*.05+1e-3));
+   float l=lum(c);s1+=l*ww;s2+=l*l*ww;ws+=ww;cs+=c*ww;}
+  s1/=ws;s2/=ws;float sv=max(s2-s1*s1,0.);
+  v=mix(sv,tv,w);
+  if(uPre>0.)m=mix(m,cs/ws,uPre*(1.-w)*.5);
+ }
+ if(uAdaptive==0)v=max(v,max(m2-m1*m1,0.)*.25);
+ oC=vec4(m,v);oG=vec4(N,Z);}`;
+
+const ATROUS=`#version 300 es
+precision highp float;
+uniform sampler2D uC,uG;uniform int uStep;uniform float uSL,uSN,uSZ;
+out vec4 o;
+float lum(vec3 c){return dot(c,vec3(.2126,.7152,.0722));}
+void main(){ivec2 p=ivec2(gl_FragCoord.xy);ivec2 sz=textureSize(uC,0);
+ vec4 c=texelFetch(uC,p,0);vec4 g=texelFetch(uG,p,0);
+ float v=0.;for(int j=-1;j<=1;j++)for(int i=-1;i<=1;i++){float k=(i==0&&j==0)?.25:((i==0||j==0)?.125:.0625);v+=k*texelFetch(uC,clamp(p+ivec2(i,j),ivec2(0),sz-1),0).a;}
+ float lc=lum(c.rgb);float dL=uSL*sqrt(max(v,0.))+1e-5;
+ const float hk[3]=float[3](.375,.25,.0625);
+ vec3 sum=vec3(0);float sv=0.,ws=0.;
+ for(int j=-2;j<=2;j++)for(int i=-2;i<=2;i++){
+  ivec2 q=p+ivec2(i,j)*uStep;if(any(lessThan(q,ivec2(0)))||any(greaterThanEqual(q,sz)))continue;
+  vec4 cq=texelFetch(uC,q,0);vec4 gq=texelFetch(uG,q,0);
+  float h=hk[abs(i)]*hk[abs(j)];
+  float wN=pow(max(dot(g.xyz,gq.xyz),0.),uSN);
+  float wZ=exp(-abs(g.w-gq.w)/(uSZ*.02*g.w*length(vec2(i,j))*float(uStep)+1e-4));
+  float wL=exp(-abs(lc-lum(cq.rgb))/dL);
+  float w=(i==0&&j==0)?h:h*wN*wZ*wL;
+  sum+=cq.rgb*w;sv+=w*w*cq.a;ws+=w;}
+ o=vec4(sum/ws,sv/(ws*ws));}`;
+
+const FINAL=`#version 300 es
+precision highp float;
+uniform sampler2D uA0,uA3,uD,uP,uG;uniform int uDen,uPass,uTone,uCmp,uDemod;uniform float uSplit,uExp,uDetail;uniform vec2 uRes;
+out vec4 o;
+vec3 aces(vec3 x){return clamp((x*(2.51*x+.03))/(x*(2.43*x+.59)+.14),0.,1.);}
+vec3 agx(vec3 x){x=x/(1.+x*.18);vec3 l=log2(max(x,1e-5));l=clamp((l+10.)/16.5,0.,1.);vec3 x2=l*l,x4=x2*x2;
+ return clamp(15.5*x4*x2-40.14*x4*l+31.96*x4-6.868*x2*l+.4298*x2+.1191*l-.00232,0.,1.);}
+void main(){ivec2 p=ivec2(gl_FragCoord.xy);vec2 uv=gl_FragCoord.xy/uRes;
+ vec4 a0=texelFetch(uA0,p,0);float n=max(a0.a,1.);vec3 raw=a0.rgb/n;
+ vec3 alb=texelFetch(uA3,p,0).rgb/n;vec4 pc=texelFetch(uP,p,0);vec4 d=texelFetch(uD,p,0);vec4 g=texelFetch(uG,p,0);
+ bool useDen=uDen==1&&!(uCmp==1&&uv.x<uSplit);
+ vec3 dm=useDen?mix(d.rgb,pc.rgb,uDetail):raw;
+ vec3 col=dm*alb;
+ if(uPass==1)col=raw*alb;else if(uPass==2){o=vec4(g.xyz*.5+.5,1);return;}else if(uPass==3){o=vec4(pow(alb,vec3(1./2.2)),1);return;}
+ else if(uPass==4){o=vec4(vec3(sqrt(pc.a)*2.),1);return;}else if(uPass==5){o=vec4(vec3(1.-clamp(g.w/20.,0.,1.)),1);return;}
+ col*=exp2(uExp);
+ vec3 t=uTone==0?agx(col):uTone==1?pow(aces(col),vec3(1./2.2)):pow(clamp(col,0.,1.),vec3(1./2.2));
+ o=vec4(t,1);}`;
+
+function sh(t,s){const x=gl.createShader(t);gl.shaderSource(x,s);gl.compileShader(x);if(!gl.getShaderParameter(x,gl.COMPILE_STATUS))throw console.error(gl.getShaderInfoLog(x)),'sh';return x;}
+function prog(fs){const p=gl.createProgram();gl.attachShader(p,sh(gl.VERTEX_SHADER,VS));gl.attachShader(p,sh(gl.FRAGMENT_SHADER,fs));gl.linkProgram(p);
+ if(!gl.getProgramParameter(p,gl.LINK_STATUS))throw console.error(gl.getProgramInfoLog(p)),'ln';const u={};
+ const k=gl.getProgramParameter(p,gl.ACTIVE_UNIFORMS);for(let i=0;i<k;i++){const n=gl.getActiveUniform(p,i).name;u[n]=gl.getUniformLocation(p,n);}p.u=u;return p;}
+const P={t:prog(TRACE),p:prog(PREP),a:prog(ATROUS),f:prog(FINAL)};
+gl.bindVertexArray(gl.createVertexArray());
+
+let W=0,Hh=0,acc=[],prepT=[],prepF,atT=[],atF=[];
+function tex(){const t=gl.createTexture();gl.bindTexture(gl.TEXTURE_2D,t);gl.texStorage2D(gl.TEXTURE_2D,1,gl.RGBA32F,W,Hh);
+ for(const k of[gl.TEXTURE_MIN_FILTER,gl.TEXTURE_MAG_FILTER])gl.texParameteri(gl.TEXTURE_2D,k,gl.NEAREST);
+ gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);return t;}
+function fbo(ts){const f=gl.createFramebuffer();gl.bindFramebuffer(gl.FRAMEBUFFER,f);ts.forEach((t,i)=>gl.framebufferTexture2D(gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT0+i,gl.TEXTURE_2D,t,0));
+ gl.drawBuffers(ts.map((_,i)=>gl.COLOR_ATTACHMENT0+i));return f;}
+let scale=1;
+function resize(){const r=document.getElementById('vp').getBoundingClientRect();const dpr=Math.min(devicePixelRatio,1.5)*scale;
+ W=Math.max(8,Math.floor(r.width*dpr));Hh=Math.max(8,Math.floor(r.height*dpr));cv.width=W;cv.height=Hh;
+ acc=[0,1].map(()=>{const ts=[tex(),tex(),tex(),tex()];return{ts,f:fbo(ts)}});
+ prepT=[tex(),tex()];prepF=fbo(prepT);atT=[tex(),tex()];atF=atT.map(t=>fbo([t]));reset();}
+
+// camera
+const cam={th:.35,ph:.32,r:8.5,tg:[0,1.1,.6]};let spp=0,frame=0,cur=0,paused=false;
+function reset(){spp=0;}
+function camVec(){const{th,ph,r,tg}=cam;const p=[tg[0]+r*Math.sin(th)*Math.cos(ph),tg[1]+r*Math.sin(ph),tg[2]+r*Math.cos(th)*Math.cos(ph)];
+ const f=norm(sub(tg,p)),rt=norm(cross(f,[0,1,0])),u=cross(rt,f);return{p,f,rt,u};}
+const sub=(a,b)=>[a[0]-b[0],a[1]-b[1],a[2]-b[2]],cross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]],norm=a=>{const l=Math.hypot(...a);return a.map(x=>x/l)};
+
+const $=id=>document.getElementById(id);
+const ui={den:true,cmp:false,split:.5};
+const presets={fast:{it:3,pre:0},hq:{it:5,pre:0},ultra:{it:6,pre:1}};
+
+function draw(){
+ const t0=performance.now();
+ const c=camVec();
+ if(!paused&&spp<S.maxSpp){
+  for(let s=0;s<S.spf&&spp<S.maxSpp;s++){
+   const src=acc[cur],dst=acc[1-cur];gl.bindFramebuffer(gl.FRAMEBUFFER,dst.f);gl.viewport(0,0,W,Hh);gl.useProgram(P.t);const u=P.t.u;
+   src.ts.forEach((t,i)=>{gl.activeTexture(gl.TEXTURE0+i);gl.bindTexture(gl.TEXTURE_2D,t);gl.uniform1i(u['uP'+i],i);});
+   gl.uniform2f(u.uRes,W,Hh);gl.uniform1i(u.uFrame,frame++);gl.uniform1i(u.uBounces,S.bounces);gl.uniform1i(u.uReset,spp===0?1:0);gl.uniform1i(u.uNee,$('nee').checked?1:0);
+   gl.uniform3fv(u.uCP,c.p);gl.uniform3fv(u.uCF,c.f);gl.uniform3fv(u.uCR,c.rt);gl.uniform3fv(u.uCU,c.u);gl.uniform1f(u.uFov,1.6);
+   gl.uniform1f(u.uClamp,S.clamp);gl.uniform1f(u.uSky,S.sky);gl.uniform1f(u.uLI,S.light);
+   gl.drawArrays(gl.TRIANGLES,0,3);cur=1-cur;spp++;
+  }
+ }
+ const A=acc[cur].ts,pr=presets[$('preset').value];
+ // prep
+ gl.bindFramebuffer(gl.FRAMEBUFFER,prepF);gl.useProgram(P.p);
+ [A[0],A[1],A[2]].forEach((t,i)=>{gl.activeTexture(gl.TEXTURE0+i);gl.bindTexture(gl.TEXTURE_2D,t);gl.uniform1i(P.p.u['uA'+i],i);});
+ gl.uniform1i(P.p.u.uAdaptive,$('adaptive').checked?1:0);gl.uniform1f(P.p.u.uPre,pr.pre);gl.drawArrays(gl.TRIANGLES,0,3);
+ // atrous
+ let inT=prepT[0],k=0;
+ if(ui.den){gl.useProgram(P.a);const u=P.a.u;gl.uniform1f(u.uSL,S.sL);gl.uniform1f(u.uSN,S.sN);gl.uniform1f(u.uSZ,S.sZ);
+  for(let i=0;i<pr.it;i++){gl.bindFramebuffer(gl.FRAMEBUFFER,atF[k]);gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,inT);gl.uniform1i(u.uC,0);
+   gl.activeTexture(gl.TEXTURE1);gl.bindTexture(gl.TEXTURE_2D,prepT[1]);gl.uniform1i(u.uG,1);gl.uniform1i(u.uStep,1<<i);gl.drawArrays(gl.TRIANGLES,0,3);inT=atT[k];k=1-k;}}
+ // final
+ gl.bindFramebuffer(gl.FRAMEBUFFER,null);gl.useProgram(P.f);const u=P.f.u;
+ [[A[0],'uA0'],[A[3],'uA3'],[inT,'uD'],[prepT[0],'uP'],[prepT[1],'uG']].forEach(([t,n],i)=>{gl.activeTexture(gl.TEXTURE0+i);gl.bindTexture(gl.TEXTURE_2D,t);gl.uniform1i(u[n],i);});
+ gl.uniform1i(u.uDen,ui.den?1:0);gl.uniform1i(u.uPass,+$('pass').value);gl.uniform1i(u.uTone,+$('tone').value);gl.uniform1i(u.uCmp,ui.cmp?1:0);
+ gl.uniform1f(u.uSplit,ui.split);gl.uniform1f(u.uExp,S.exposure);gl.uniform1f(u.uDetail,S.detail);gl.uniform2f(u.uRes,W,Hh);
+ gl.drawArrays(gl.TRIANGLES,0,3);
+ const ms=performance.now()-t0;
+ $('hud').innerHTML=`采样 <b style="color:#fff">${spp}</b> / ${S.maxSpp} ${spp>=S.maxSpp?'<span style="color:#7c6">✔ 完成</span>':paused?'<span style="color:#fa0">⏸ 暂停</span>':''}<br>${W}×${Hh} · ${ms.toFixed(1)} ms`;
+ $('hud2').innerHTML=ui.den?`<span style="color:#6ea0ff">● 降噪: ${$('preset').selectedOptions[0].text}</span>`:'<span style="color:#999">○ 降噪关闭</span>';
+ $('prog').style.width=(spp/S.maxSpp*100)+'%';
+ $('st1').textContent=spp>=S.maxSpp?'渲染完成':'渲染中… 拖动视图时降噪器可保持画面干净';
+ $('st2').textContent=`反弹 ${S.bounces} · 钳制 ${S.clamp}`;
+ requestAnimationFrame(draw);
+}
+
+// sliders
+document.querySelectorAll('.slider').forEach(el=>{const k=el.dataset.k,mn=+el.dataset.min,mx=+el.dataset.max,st=+el.dataset.step;
+ el.innerHTML='<div class="fill"></div><span></span>';
+ const upd=()=>{el.firstChild.style.width=((S[k]-mn)/(mx-mn)*100)+'%';el.lastChild.textContent=el.dataset.int?S[k]:(+S[k]).toFixed(2);};upd();
+ const set=x=>{const r=el.getBoundingClientRect();let v=mn+(mx-mn)*Math.min(1,Math.max(0,(x-r.left)/r.width));v=Math.round(v/st)*st;v=+v.toFixed(4);
+  if(v!==S[k]){S[k]=v;upd();if(['bounces','clamp','light','sky'].includes(k))reset();}};
+ el.onpointerdown=e=>{el.setPointerCapture(e.pointerId);set(e.clientX);el.onpointermove=ev=>set(ev.clientX);};
+ el.onpointerup=()=>el.onpointermove=null;
+ el.ondblclick=()=>{const v=prompt(k,S[k]);if(v!==null&&!isNaN(+v)){S[k]=Math.min(mx,Math.max(mn,+v));upd();reset();}};
+});
+document.querySelectorAll('.sec>h3').forEach(h=>h.onclick=()=>h.parentElement.classList.toggle('closed'));
+$('nee').onchange=reset;$('scale').onchange=e=>{scale=+e.target.value;resize();};
+$('preset').onchange=e=>{const v=e.target.value;S.sL=v==='fast'?3:v==='hq'?4:5.5;document.querySelectorAll('.slider').forEach(s=>s.dispatchEvent(new Event('refresh')));toast('降噪器: '+e.target.selectedOptions[0].text);refreshSliders();};
+function refreshSliders(){document.querySelectorAll('.slider').forEach(el=>{const k=el.dataset.k,mn=+el.dataset.min,mx=+el.dataset.max;el.firstChild.style.width=((S[k]-mn)/(mx-mn)*100)+'%';el.lastChild.textContent=el.dataset.int?S[k]:(+S[k]).toFixed(2);});}
+
+function setDen(v){ui.den=v;$('denOn').checked=v;$('bDen').classList.toggle('active',v);toast(v?'降噪已开启':'降噪已关闭');}
+function setCmp(v){ui.cmp=v;$('bCmp').classList.toggle('active',v);const d=$('divider');d.style.display=v?'block':'none';d.style.left=(ui.split*100)+'%';if(v&&!ui.den)setDen(true);}
+function setPause(v){paused=v;$('bPause').innerHTML=v?'<i class="fa-solid fa-play"></i>':'<i class="fa-solid fa-pause"></i>';}
+$('denOn').onchange=e=>setDen(e.target.checked);$('bDen').onclick=()=>setDen(!ui.den);$('bCmp').onclick=()=>setCmp(!ui.cmp);
+$('bPause').onclick=()=>setPause(!paused);$('bReset').onclick=()=>{reset();toast('重新渲染');};$('bSave').onclick=save;
+function save(){const a=document.createElement('a');a.download=`render_${spp}spp.png`;a.href=cv.toDataURL('image/png');a.click();toast('已保存 PNG');}
+let tt;function toast(m){const t=$('toast');t.textContent=m;t.style.opacity=1;clearTimeout(tt);tt=setTimeout(()=>t.style.opacity=0,1200);}
+
+// divider drag
+$('divider').onpointerdown=e=>{e.stopPropagation();const d=$('divider');d.setPointerCapture(e.pointerId);
+ d.onpointermove=ev=>{const r=$('vp').getBoundingClientRect();ui.split=Math.min(1,Math.max(0,(ev.clientX-r.left)/r.width));d.style.left=(ui.split*100)+'%';};
+ d.onpointerup=()=>d.onpointermove=null;};
+
+// orbit
+let drag=null;cv.oncontextmenu=e=>e.preventDefault();
+cv.onpointerdown=e=>{cv.setPointerCapture(e.pointerId);drag={x:e.clientX,y:e.clientY,pan:e.button===2||e.button===1||e.shiftKey};};
+cv.onpointermove=e=>{if(!drag)return;const dx=e.clientX-drag.x,dy=e.clientY-drag.y;drag.x=e.clientX;drag.y=e.clientY;
+ if(drag.pan){const c=camVec(),s=cam.r*.0015;for(let i=0;i<3;i++)cam.tg[i]+=-c.rt[i]*dx*s+c.u[i]*dy*s;}
+ else{cam.th-=dx*.006;cam.ph=Math.min(1.45,Math.max(-.05,cam.ph+dy*.006));}reset();};
+cv.onpointerup=()=>drag=null;
+cv.onwheel=e=>{e.preventDefault();cam.r=Math.min(30,Math.max(2,cam.r*Math.exp(e.deltaY*.001)));reset();};
+addEventListener('keydown',e=>{if(e.target.tagName==='INPUT'&&e.target.type!=='checkbox')return;const k=e.key.toLowerCase();
+ if(k==='d')setDen(!ui.den);else if(k==='c')setCmp(!ui.cmp);else if(k===' '){e.preventDefault();setPause(!paused);}else if(k==='r')reset();
+ else if(e.key==='F12'){e.preventDefault();save();}else if(k>='1'&&k<='6'){$('pass').value=+k-1;}});
+addEventListener('resize',()=>{clearTimeout(window._rz);window._rz=setTimeout(resize,120);});
+$('bDen').classList.add('active');
+resize();requestAnimationFrame(draw);
+</script>
+</body>
+</html>
